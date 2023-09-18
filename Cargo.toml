@@ -1,0 +1,36 @@
+[package]
+resolver = "2"
+name = "splatter"
+version = "0.0.1"
+authors = ["Alexander Meißner <AlexanderMeissner@gmx.net>"]
+description = "A gaussian splat render engine"
+repository = "https://github.com/Lichtso/splatter/"
+keywords = ["3d", "graphics", "splats", "point-cloud"]
+license = "MIT"
+edition = "2018"
+
+[dependencies]
+wgpu = "0.17.0"
+geometric_algebra = "0.3.0"
+
+
+### Showcase Example ###
+
+[dev-dependencies]
+winit = "0.27.0"
+log = "0.4"
+
+[package.metadata.wasm-pack.profile.release]
+wasm-opt = ["-Oz", "--enable-mutable-globals"]
+
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+async-executor = "1.0"
+pollster = "0.2"
+
+[target.'cfg(target_arch = "wasm32")'.dev-dependencies]
+web-sys = "0.3.64"
+js-sys = "0.3.64"
+wasm-bindgen = "0.2.87"
+wasm-bindgen-futures = "0.4.36"
+console_error_panic_hook = "0.1.7"
+console_log = "0.1.2"

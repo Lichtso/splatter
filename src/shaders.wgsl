@@ -422,7 +422,6 @@ fn radixSortC(
         // Last workgroup resets the assignment number for the next pass
         sorting.assignment_counter = 0u;
     }
-    workgroupBarrier();
 
     for(var entry_index = 0u; entry_index < ENTRIES_PER_INVOCATION_C; entry_index += 1u) {
         // Load keys from global memory into shared memory
@@ -432,7 +431,6 @@ fn radixSortC(
         let digit = (key >> (sorting_pass_index * RADIX_BITS_PER_DIGIT)) & (RADIX_BASE - 1u);
         gather_sources[entry_index] = (digit << 16u) | (local_entry_offset + entry_index);
     }
-    workgroupBarrier();
 
     // Workgroup wide ranking
     // Warp-level multi-split (WLMS) can not be implemented,
@@ -464,22 +462,21 @@ fn radixSortC(
         for(var entry_index = 0u; entry_index < ENTRIES_PER_INVOCATION_C; entry_index += 1u) {
             gather_sources[entry_index] = sorting_shared_c.gather_sources[local_entry_offset + entry_index];
         }
-        workgroupBarrier();
     }
 
     // Reset histogram
-    sorting_shared_c.scan[gl_LocalInvocationID.x] = 0u;
+    sorting_shared_c.scan[gl_LocalInvocationID.x + conflicFreeOffset(gl_LocalInvocationID.x)] = 0u;
     workgroupBarrier();
 
     // Build tile histogram in shared memory
     for(var entry_index = 0u; entry_index < ENTRIES_PER_INVOCATION_C; entry_index += 1u) {
         let digit = gather_sources[entry_index] >> 16u;
-        atomicAdd(&sorting_shared_c.scan[digit], 1u);
+        atomicAdd(&sorting_shared_c.scan[digit + conflicFreeOffset(digit)], 1u);
     }
     workgroupBarrier();
 
     // Store histogram in global table
-    var local_digit_count = sorting_shared_c.scan[gl_LocalInvocationID.x];
+    var local_digit_count = sorting_shared_c.scan[gl_LocalInvocationID.x + conflicFreeOffset(gl_LocalInvocationID.x)];
     atomicStore(&sorting.status_counters[assignment][gl_LocalInvocationID.x], 0x40000000u | local_digit_count);
 
     // Chained decoupling lookback
@@ -506,13 +503,13 @@ fn radixSortC(
         sorting.draw_indirect.instance_count = global_digit_count + local_digit_count;
     }
     exclusiveScan(gl_LocalInvocationID);
-    sorting_shared_c.scan[gl_LocalInvocationID.x] = global_digit_count - sorting_shared_c.scan[gl_LocalInvocationID.x];
+    sorting_shared_c.scan[gl_LocalInvocationID.x + conflicFreeOffset(gl_LocalInvocationID.x)] = global_digit_count - sorting_shared_c.scan[gl_LocalInvocationID.x + conflicFreeOffset(gl_LocalInvocationID.x)];
     workgroupBarrier();
 
     // Store keys from shared memory into global memory
     for(var entry_index = 0u; entry_index < ENTRIES_PER_INVOCATION_C; entry_index += 1u) {
         let digit = gather_sources[entry_index] >> 16u;
-        output_entries[sorting_shared_c.scan[digit] + local_entry_offset + entry_index][0] = sorting_shared_c.entries[gather_sources[entry_index] & 0xFFFFu];
+        output_entries[sorting_shared_c.scan[digit + conflicFreeOffset(digit)] + local_entry_offset + entry_index][0] = sorting_shared_c.entries[gather_sources[entry_index] & 0xFFFFu];
     }
     workgroupBarrier();
 
@@ -525,7 +522,7 @@ fn radixSortC(
     // Store values from shared memory into global memory
     for(var entry_index = 0u; entry_index < ENTRIES_PER_INVOCATION_C; entry_index += 1u) {
         let digit = gather_sources[entry_index] >> 16u;
-        output_entries[sorting_shared_c.scan[digit] + local_entry_offset + entry_index][1] = sorting_shared_c.entries[gather_sources[entry_index] & 0xFFFFu];
+        output_entries[sorting_shared_c.scan[digit + conflicFreeOffset(digit)] + local_entry_offset + entry_index][1] = sorting_shared_c.entries[gather_sources[entry_index] & 0xFFFFu];
     }
 }
 

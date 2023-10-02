@@ -128,48 +128,40 @@ fn projectedContourOfEllipsoid(scale: vec3<f32>, rotation: vec4<f32>, translatio
     formulated as an algebraic / implicit curve: 0 = M.x.x * x^2 + M.y.y * y^2 + M.x.y * 2.0 * x * y + M.x.z * 2.0 * x + M.y.z * 2.0 * y + M.z.z
 */
 fn projectedContourOfEllipsoid(scale: vec3<f32>, rotation: vec4<f32>, translation: vec3<f32>) -> mat3x3<f32> {
-    var scale_inverse = 1.0 / vec3<f32>(scale);
-    let ellipsoid_orientation = quatToMat(rotation);
     let camera_matrix = mat3x3<f32>(uniforms.camera_matrix.x.xyz, uniforms.camera_matrix.y.xyz, uniforms.camera_matrix.z.xyz);
-
-    /*let ray_origin = uniforms.camera_matrix.w.xyz - translation;
-    var local_ray_origin = ray_origin * ellipsoid_orientation * scale_inverse;
-    let c = (dot(local_ray_origin, local_ray_origin) - 1.0) * scale_inverse * scale_inverse;
-    let b = local_ray_origin * scale_inverse * transpose(ellipsoid_orientation);
-    let B = (mat3x3<f32>(
-        b * b.x,
-        b * b.y,
-        b * b.z,
-    ) - ellipsoid_orientation * mat3x3<f32>(
-        vec3<f32>(c.x, 0.0, 0.0),
-        vec3<f32>(0.0, c.y, 0.0),
-        vec3<f32>(0.0, 0.0, c.z),
-    ) * transpose(ellipsoid_orientation));
-    let M = transpose(camera_matrix) * B * camera_matrix;*/
-
-    // Calculate the bounding cone of the ellipsoid with its vertex at the camera position#
     let ray_origin = uniforms.camera_matrix.w.xyz - translation;
-    let local_ray_origin = ray_origin * ellipsoid_orientation * scale_inverse;
-    let c = dot(local_ray_origin, local_ray_origin) - 1.0;
-    let A = mat3x3<f32>(
-        local_ray_origin * local_ray_origin.x - vec3<f32>(c, 0.0, 0.0),
-        local_ray_origin * local_ray_origin.y - vec3<f32>(0.0, c, 0.0),
-        local_ray_origin * local_ray_origin.z - vec3<f32>(0.0, 0.0, c),
-    );
+    var transform = quatToMat(rotation);
+    transform.x /= scale.x;
+    transform.y /= scale.y;
+    transform.z /= scale.z;
+    let local_ray_origin = ray_origin * transform;
+    let local_ray_origin_squared = local_ray_origin * local_ray_origin;
 
-    // Given: let local_ray_direction = vec3<f32>(normalize(camera_matrix * pos_in_view_plane * ellipsoid_orientation) * scale_inverse);
-    // A would be sufficient to render the ellipse: dot(local_ray_direction, A * local_ray_direction) = 0
+    // Calculate the bounding cone of the ellipsoid with its vertex at the camera position
+    let diagonal = 1.0 - local_ray_origin_squared.yxx - local_ray_origin_squared.zzy;
+    let triangle = local_ray_origin.yxx * local_ray_origin.zzy;
+    let A = mat3x3<f32>(
+        diagonal.x, triangle.z, triangle.y,
+        triangle.z, diagonal.y, triangle.x,
+        triangle.y, triangle.x, diagonal.z,
+    );
+    /*
+    let c = 1.0 - local_ray_origin_squared.x - local_ray_origin_squared.y - local_ray_origin_squared.z;
+    let A = mat3x3<f32>(
+        local_ray_origin * local_ray_origin.x + vec3<f32>(c, 0.0, 0.0),
+        local_ray_origin * local_ray_origin.y + vec3<f32>(0.0, c, 0.0),
+        local_ray_origin * local_ray_origin.z + vec3<f32>(0.0, 0.0, c),
+    );
+    */
+
+    // Given: let pos_in_view_plane = vec3<f32>(screenToClipSpace(stage_in.gl_Position.xy) * uniforms.view_size, 1.0);
+    // And: let local_ray_direction = camera_matrix * pos_in_view_plane * transform;
+    // The matrix A would be sufficient to render the ellipse: dot(local_ray_direction, A * local_ray_direction) = 0
     // However, we want to be independent of the ray direction, as we do not need to do this work per fragment.
 
-    // Rescale to maintain numerical precision as WebGPU only supports f32, not f64
-    // scale_inverse *= 1.0 / (scale_inverse.x * scale_inverse.y * scale_inverse.z * dot(ray_origin, ray_origin));
-
     // Calculate the projected contour from the intersection between the view plane and the bounding cone of the ellipsoid
-    var B = transpose(camera_matrix) * ellipsoid_orientation;
-    B.x *= scale_inverse.x;
-    B.y *= scale_inverse.y;
-    B.z *= scale_inverse.z;
-    let M = B * A * transpose(B);
+    transform = transpose(camera_matrix) * transform;
+    let M = transform * A * transpose(transform);
 
     // Again, M is sufficient to render the ellipse: dot(pos_in_view_plane, M * pos_in_view_plane) = 0
     return M;

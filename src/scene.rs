@@ -9,7 +9,7 @@ use std::{
     io::{BufRead, BufReader, Read, Seek, SeekFrom},
 };
 
-// Because of numerical precision issues in the sader we have to limit the excentricity of ellipsoids
+// Because of numerical precision issues in the shader we have to limit the excentricity of ellipsoids
 const MAX_SIZE_VARIANCE: f32 = 1.5;
 
 #[derive(Clone)]

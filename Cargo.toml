@@ -17,7 +17,7 @@ geometric_algebra = "0.3.0"
 ### Showcase Example ###
 
 [dev-dependencies]
-winit = "0.27.0"
+winit = "0.28.7"
 log = "0.4"
 
 [package.metadata.wasm-pack.profile.release]

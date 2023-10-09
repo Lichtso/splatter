@@ -10,7 +10,7 @@ use std::{
 };
 
 // Because of numerical precision issues in the shader we have to limit the excentricity of ellipsoids
-const MAX_SIZE_VARIANCE: f32 = 1.5;
+const MAX_SIZE_VARIANCE: f32 = 5.0;
 
 #[derive(Clone)]
 #[repr(C)]
@@ -167,9 +167,9 @@ impl Scene {
             splat_data[index][4] = if index == 0 { 1.0 } else { 0.0 };
             splat_data[index][5] = if index == 1 { 1.0 } else { 0.0 };
             splat_data[index][6] = if index == 2 { 1.0 } else { 0.0 };
-            splat_data[index][8] = 0.001;
-            splat_data[index][9] = 0.001;
-            splat_data[index][10] = 0.2;
+            splat_data[index][8] = 0.2;
+            splat_data[index][9] = 0.1;
+            splat_data[index][10] = 0.05;
             splat_data[index][11] = 1.0;
             splat_data[index][12] = if index == 0 { 1.0 } else { 0.0 };
             splat_data[index][13] = if index == 1 { 1.0 } else { 0.0 };

@@ -10,7 +10,7 @@ use std::{collections::HashSet, env, fs::File};
 
 mod application_framework;
 
-const LOAD_CHUNK_SIZE: usize = 1024 * 32;
+const LOAD_CHUNK_SIZE: usize = 0; // 1024 * 32;
 
 /// Creates a [Rotor] which represents a rotation by `angle` radians around `axis`.
 fn rotate_around_axis(angle: f32, axis: &[f32; 3]) -> Rotor {
@@ -32,13 +32,14 @@ struct Application {
 }
 
 impl application_framework::Application for Application {
-    fn new(device: &wgpu::Device, _queue: &mut wgpu::Queue, surface_configuration: &wgpu::SurfaceConfiguration) -> Self {
+    fn new(device: &wgpu::Device, queue: &mut wgpu::Queue, surface_configuration: &wgpu::SurfaceConfiguration) -> Self {
         let file = File::open(env::args().nth(1).unwrap()).unwrap();
         let renderer = Renderer::new(
             device,
             Configuration {
                 surface_configuration: surface_configuration.clone(),
                 depth_sorting: DepthSorting::Gpu,
+                use_covariance_for_scale: true,
                 use_unaligned_rectangles: true,
                 spherical_harmonics_order: 2,
                 max_splat_count: 1024 * 1024 * 4,
@@ -48,9 +49,14 @@ impl application_framework::Application for Application {
                 splat_scale: 1.0,
             },
         );
-        let (file_header_size, splat_count, file) = Scene::parse_file_header(file);
-        let scene = Scene::new(device, &renderer, splat_count);
-        let chunks_left_to_load = (scene.splat_count + LOAD_CHUNK_SIZE - 1) / LOAD_CHUNK_SIZE;
+        let (file_header_size, splat_count, mut file) = Scene::parse_file_header(file);
+        let mut scene = Scene::new(device, &renderer, splat_count);
+        let chunks_left_to_load = if LOAD_CHUNK_SIZE == 0 {
+            scene.load_chunk(queue, &mut file, file_header_size, 0..splat_count);
+            0
+        } else {
+            (scene.splat_count + LOAD_CHUNK_SIZE - 1) / LOAD_CHUNK_SIZE
+        };
         Self {
             renderer,
             scene,

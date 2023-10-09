@@ -28,6 +28,8 @@ pub struct Configuration {
     pub surface_configuration: wgpu::SurfaceConfiguration,
     /// Selects how splats are sorted by their distance to the camera
     pub depth_sorting: DepthSorting,
+    /// Uses the parallel projected covariance for decomposition of semi axes
+    pub use_covariance_for_scale: bool,
     /// Decomposes the conic sections and renders them as rotated rectangles
     pub use_unaligned_rectangles: bool,
     /// How many spherical harmonics coefficients to use, possible values are 0..=3
@@ -111,6 +113,7 @@ impl Renderer {
                     ""
                 ),
             ),
+            ("USE_COVARIANCE_FOR_SCALE", format!("{}{}", config.use_covariance_for_scale, "")),
             ("USE_UNALIGNED_RECTANGLES", format!("{}{}", config.use_unaligned_rectangles, "")),
             ("SPHERICAL_HARMONICS_ORDER", format!("{}{}", config.spherical_harmonics_order, "u")),
             ("MAX_SPLAT_COUNT", format!("{}{}", config.max_splat_count, "u")),

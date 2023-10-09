@@ -84,33 +84,6 @@ fn quatToMat(p: vec4<f32>) -> mat3x3<f32> {
     The issue is that this method of taking the 3D covariance and projecting it to 2D only works for
     parallel / orthographic projections, not perspective projections.
 
-fn projectedContourOfEllipsoid(scale: vec3<f32>, rotation: vec4<f32>, translation: vec3<f32>) -> vec3<f32> {
-    // 3D Covariance
-    var view_pos = uniforms.view_matrix * vec4<f32>(translation, 1.0);
-    var screen_view_factor = vec2<f32>(uniforms.image_size) / (2.0 * uniforms.view_size);
-    screen_view_factor *= 1.0 / view_pos.z;
-    var T = transpose(mat3x3<f32>(
-        screen_view_factor.x, 0.0, -screen_view_factor.x * view_pos.x / view_pos.z,
-        0.0, screen_view_factor.y, -screen_view_factor.y * view_pos.y / view_pos.z,
-        0.0, 0.0, 0.0,
-    ))
-        * mat3x3<f32>(uniforms.view_matrix.x.xyz, uniforms.view_matrix.y.xyz, uniforms.view_matrix.z.xyz)
-        * quatToMat(rotation)
-        * mat3x3<f32>(
-        scale.x, 0.0, 0.0,
-        0.0, scale.y, 0.0,
-        0.0, 0.0, scale.z,
-    );
-    var covariance_matrix = T * transpose(T);
-
-    // Calculate conic by inverting the covariance matrix
-    var covariance = vec3<f32>(covariance_matrix.x.x, covariance_matrix.x.y, covariance_matrix.y.y);
-    var determinant = (covariance.x * covariance.z - covariance.y * covariance.y);
-    var conic = vec3<f32>(covariance.z, -covariance.y, covariance.x) / determinant;
-
-    return conic;
-}
-
     The reason is that perspective projections have three additional effects:
       - Parallax movements (that is the view plane moves parallel to the ellipsoids) change the shape of the projected ellipse.
         E.g. a sphere only appears circular when in center of the view, once it moves to the edges it becomes stretched into an ellipse.
@@ -122,18 +95,40 @@ fn projectedContourOfEllipsoid(scale: vec3<f32>, rotation: vec4<f32>, translatio
       - Conic sections can not only result in ellipses but also parabola and hyperbola.
         This however is an edge case that only happens when the ellipsoid intersects with the view plane and
         can probably be ignored as one would clip away such ellipsoids anyway.
+*/
+fn projectedCovarianceOfEllipsoid(scale: vec3<f32>, rotation: vec4<f32>, translation: vec3<f32>) -> mat3x3<f32> {
+    let camera_matrix = mat3x3<f32>(uniforms.camera_matrix.x.xyz, uniforms.camera_matrix.y.xyz, uniforms.camera_matrix.z.xyz);
+    var transform = quatToMat(rotation);
+    transform.x *= scale.x;
+    transform.y *= scale.y;
+    transform.z *= scale.z;
 
+    // 3D Covariance
+    var view_pos = uniforms.view_matrix * vec4<f32>(translation, 1.0);
+    view_pos.x = clamp(view_pos.x / view_pos.z, -1.0, 1.0) * view_pos.z;
+    view_pos.y = clamp(view_pos.y / view_pos.z, -1.0, 1.0) * view_pos.z;
+    let T = transpose(transform) * camera_matrix * mat3x3(
+        1.0 / view_pos.z, 0.0, -view_pos.x / (view_pos.z * view_pos.z),
+        0.0, 1.0 / view_pos.z, -view_pos.y / (view_pos.z * view_pos.z),
+        0.0, 0.0, 0.0,
+    );
+    let covariance_matrix = transpose(T) * T;
+
+    return covariance_matrix;
+}
+
+/*
     The correct approach is to instead construct a bounding cone with its vertex at the camera position, which bounds the ellipsoid in 3D.
     Then find the intersection between that bounding cone and the view plane. The resulting conic section is the correct contour in 2D,
     formulated as an algebraic / implicit curve: 0 = M.x.x * x^2 + M.y.y * y^2 + M.x.y * 2.0 * x * y + M.x.z * 2.0 * x + M.y.z * 2.0 * y + M.z.z
 */
 fn projectedContourOfEllipsoid(scale: vec3<f32>, rotation: vec4<f32>, translation: vec3<f32>) -> mat3x3<f32> {
     let camera_matrix = mat3x3<f32>(uniforms.camera_matrix.x.xyz, uniforms.camera_matrix.y.xyz, uniforms.camera_matrix.z.xyz);
-    let ray_origin = uniforms.camera_matrix.w.xyz - translation;
     var transform = quatToMat(rotation);
     transform.x /= scale.x;
     transform.y /= scale.y;
     transform.z /= scale.z;
+    let ray_origin = uniforms.camera_matrix.w.xyz - translation;
     let local_ray_origin = ray_origin * transform;
     let local_ray_origin_squared = local_ray_origin * local_ray_origin;
 
@@ -145,13 +140,19 @@ fn projectedContourOfEllipsoid(scale: vec3<f32>, rotation: vec4<f32>, translatio
         triangle.z, diagonal.y, triangle.x,
         triangle.y, triangle.x, diagonal.z,
     );
+
     /*
-    let c = 1.0 - local_ray_origin_squared.x - local_ray_origin_squared.y - local_ray_origin_squared.z;
-    let A = mat3x3<f32>(
-        local_ray_origin * local_ray_origin.x + vec3<f32>(c, 0.0, 0.0),
-        local_ray_origin * local_ray_origin.y + vec3<f32>(0.0, c, 0.0),
-        local_ray_origin * local_ray_origin.z + vec3<f32>(0.0, 0.0, c),
+    let c = local_ray_origin_squared.x + local_ray_origin_squared.y + local_ray_origin_squared.z;
+    let d = sqrt(c + 1.0);
+    let e = 1.0 / c;
+    let diagonal = (local_ray_origin_squared + (local_ray_origin_squared.yxx + local_ray_origin_squared.zzy) * d) * e;
+    let triangle = local_ray_origin.yxx * local_ray_origin.zzy * (1.0 - d) * e;
+    let A = transform * mat3x3<f32>(
+        diagonal.x, triangle.z, triangle.y,
+        triangle.z, diagonal.y, triangle.x,
+        triangle.y, triangle.x, diagonal.z,
     );
+    let sqrt_M = transpose(A) * camera_matrix;
     */
 
     // Given: let pos_in_view_plane = vec3<f32>(screenToClipSpace(stage_in.gl_Position.xy) * uniforms.view_size, 1.0);
@@ -174,27 +175,30 @@ fn projectedContourOfEllipsoid(scale: vec3<f32>, rotation: vec4<f32>, translatio
     Formulas: https://math.stackexchange.com/questions/616645/determining-the-major-minor-axes-of-an-ellipse-from-general-form
     Formulas: https://mathworld.wolfram.com/Ellipse.html
 */
-fn extractTransformationOfEllipse(M: mat3x3<f32>) -> mat3x2<f32> {
-    /* Extract translation:
+
+fn extractTranslationOfEllipse(M: mat3x3<f32>) -> vec2<f32> {
+    /*
         The center of the ellipse is at the extremum (minimum / maximum) of the implicit curve.
         So, take the partial derivative in x and y, which is: (2.0 * M.x.x * x + M.x.y * y + M.x.z, M.x.y * x + 2.0 * M.y.y * y + M.y.z)
         And the roots of that partial derivative are the position of the extremum, thus the translation of the ellipse.
     */
     let discriminant = M.x.x * M.y.y - M.x.y * M.x.y;
     let inverse_discriminant = 1.0 / discriminant;
-    let translation = vec2<f32>(
+    return vec2<f32>(
         M.x.y * M.y.z - M.y.y * M.x.z,
         M.x.y * M.x.z - M.x.x * M.y.z,
     ) * inverse_discriminant;
+}
 
-    /* Extract rotation:
+fn extractRotationOfEllipse(M: mat3x3<f32>) -> vec2<f32> {
+    /*
         phi = atan(2.0 * M.x.y / (M.x.x - M.y.y)) / 2
         k = cos(phi)
         j = sin(phi)
         Insert angle phi into cos() and then apply the half-angle identity to get:
     */
     let a = (M.x.x - M.y.y) * (M.x.x - M.y.y);
-    var b = a + 4.0 * M.x.y * M.x.y;
+    let b = a + 4.0 * M.x.y * M.x.y;
     let c = 0.5 * sqrt(a / b);
     var j = sqrt(0.5 - c);
     var k = -sqrt(0.5 + c) * sign(M.x.y) * sign(M.x.x - M.y.y);
@@ -207,30 +211,38 @@ fn extractTransformationOfEllipse(M: mat3x3<f32>) -> mat3x2<f32> {
         j = -k;
         k = t;
     }
+    return vec2<f32>(j, k);
+}
 
-    // Extract scale
-    b = sqrt(b);
+fn extractScaleOfEllipse(M: mat3x3<f32>, translation: vec2<f32>, rotation: vec2<f32>) -> vec2<f32> {
+    /*b = sqrt(b);
     let q = (M.z.z + (2.0 * M.x.y * M.x.z * M.y.z - (M.x.x * M.y.z * M.y.z + M.y.y * M.x.z * M.x.z)) * inverse_discriminant) * inverse_discriminant * 0.25;
     let focal_point_squared = 4.0 * abs(q) * b;
     let semi_major_axis_squared = (b - sign(q) * (M.x.x + M.y.y)) * q * 2.0;
     let semi_major_axis = sqrt(semi_major_axis_squared);
-    let semi_minor_axis = sqrt(semi_major_axis_squared - focal_point_squared);
+    let semi_minor_axis = sqrt(semi_major_axis_squared - focal_point_squared);*/
 
     /*b = sqrt(b);
     let numerator = -2.0 * (M.x.x * M.y.z * M.y.z + M.y.y * M.x.z * M.x.z + M.z.z * M.x.y * M.x.y - 2.0 * M.x.y * M.x.z * M.y.z - M.x.x * M.y.y * M.z.z);
     let semi_major_axis = sqrt(numerator / (discriminant * (-b - (M.x.x + M.y.y))));
     let semi_minor_axis = sqrt(numerator / (discriminant * (b - (M.x.x + M.y.y))));*/
 
-    /*let d = 2.0 * M.x.y * j * k;
+    let d = 2.0 * M.x.y * rotation.x * rotation.y;
     let e = M.z.z - (M.x.x * translation.x * translation.x + M.y.y * translation.y * translation.y + 2.0 * M.x.y * translation.x * translation.y);
-    let semi_major_axis = sqrt(abs(e / (M.x.x * k * k + M.y.y * j * j - d)));
-    let semi_minor_axis = sqrt(abs(e / (M.x.x * j * j + M.y.y * k * k + d)));*/
+    // let e = dot(sqrt_M.z, sqrt_M.z) - dot(sqrt_M.x * translation.x + sqrt_M.y * translation.y, sqrt_M.x * translation.x + sqrt_M.y * translation.y);
+    let semi_major_axis = sqrt(abs(e / (M.x.x * rotation.y * rotation.y + M.y.y * rotation.x * rotation.x - d)));
+    let semi_minor_axis = sqrt(abs(e / (M.x.x * rotation.x * rotation.x + M.y.y * rotation.y * rotation.y + d)));
 
-    return mat3x2<f32>(
-        vec2<f32>(k, -j) * (uniforms.ellipse_size_bias + semi_major_axis),
-        vec2<f32>(j, k) * (uniforms.ellipse_size_bias + semi_minor_axis),
-        translation,
-    );
+    return vec2<f32>(semi_major_axis, semi_minor_axis);
+}
+
+// Same as extractScaleOfEllipse() but expects the input to be normalized
+fn extractScaleOfCovariance(M: mat3x3<f32>) -> vec2<f32> {
+    let a = (M.x.x - M.y.y) * (M.x.x - M.y.y);
+    let b = sqrt(a + 4.0 * M.x.y * M.x.y);
+    let semi_major_axis = sqrt((M.x.x + M.y.y + b) * 0.5);
+    let semi_minor_axis = sqrt((M.x.x + M.y.y - b) * 0.5);
+    return vec2<f32>(semi_major_axis, semi_minor_axis);
 }
 
 // Spherical harmonics coefficients
@@ -552,7 +564,20 @@ fn vertex(
     let ray_direction = normalize(world_position - uniforms.camera_matrix.w.xyz);
     stage_out.color = vec4<f32>(sphericalHarmonicsLookup(ray_direction, splat_index), splats[splat_index].alpha);
     let M = projectedContourOfEllipsoid(splats[splat_index].scale * uniforms.splat_scale, splats[splat_index].rotation, world_position);
-    let transformation = extractTransformationOfEllipse(M);
+    let translation = extractTranslationOfEllipse(M);
+    let rotation = extractRotationOfEllipse(M);
+    var semi_axes: vec2<f32>;
+    if(USE_COVARIANCE_FOR_SCALE) {
+        let covariance = projectedCovarianceOfEllipsoid(splats[splat_index].scale * uniforms.splat_scale, splats[splat_index].rotation, world_position);
+        semi_axes = extractScaleOfCovariance(covariance);
+    } else {
+        semi_axes = extractScaleOfEllipse(M, translation, rotation);
+    }
+    var transformation = mat3x2<f32>(
+        vec2<f32>(rotation.y, -rotation.x) * (uniforms.ellipse_size_bias + semi_axes.x),
+        vec2<f32>(rotation.x, rotation.y) * (uniforms.ellipse_size_bias + semi_axes.y),
+        translation,
+    );
     var quad_vertices = array<vec2<f32>, 4>(
         vec2<f32>(-1.0, -1.0),
         vec2<f32>(-1.0,  1.0),

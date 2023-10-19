@@ -89,8 +89,8 @@ impl Renderer {
         let radix_digit_places = 32 / config.radix_bits_per_digit;
         assert_eq!(32, radix_digit_places * config.radix_bits_per_digit);
         let radix_base = 1 << config.radix_bits_per_digit;
-        let entries_per_invocation_a = 8;
-        let entries_per_invocation_c = 8;
+        let entries_per_invocation_a = 4;
+        let entries_per_invocation_c = 4;
         let workgroup_invocations_a = radix_base * radix_digit_places;
         let workgroup_invocations_c = radix_base;
         let workgroup_entries_a = workgroup_invocations_a * entries_per_invocation_a;
@@ -460,7 +460,7 @@ impl Renderer {
             println!("{:X?}", transmute_slice::<u8, [u32; 256]>(&*buffer.unwrap()));
         });
         wgpu::util::DownloadBuffer::read_buffer(device, queue, &self.entry_buffer_a.slice(..), |buffer: Result<wgpu::util::DownloadBuffer, wgpu::BufferAsyncError>| {
-            println!("{:X?}", transmute_slice::<u8, [(u32, u32); 2048]>(&*buffer.unwrap()));
+            println!("{:X?}", transmute_slice::<u8, [(u32, u32); 1024]>(&*buffer.unwrap()));
         });*/
         queue.submit(Some(encoder.finish()));
     }

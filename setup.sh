@@ -1,6 +1,6 @@
 #!usr/bin/env sh
 
-# To run : curl https://url -sSf | sh
+# To run : curl https://raw.githubusercontent.com/cs50victor/splatter/main/setup.sh -sSf | sh
 
 
 sudo apt update
